@@ -12,7 +12,7 @@ The photocurrent response of the device under varying light intensity, motion di
   <img src="functions/dataset.png" width="650">
 </p>
 
-## network
+## Network
 
 The model consists of four convolutional layers with pooling (Conv 1–Conv 4), followed by an LSTM and an attention mechanism for temporal feature extraction. A ReLU with Dropout layer and a classification head are applied to generate outputs corresponding to light intensity, motion speed, and direction.
 
