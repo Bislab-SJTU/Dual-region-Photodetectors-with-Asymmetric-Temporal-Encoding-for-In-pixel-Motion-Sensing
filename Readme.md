@@ -1,4 +1,4 @@
-# In-Sensor Waveform Encoding for Motion Perception via Structural Engineering of Asymmetric Perovskite Photodetectors
+# Dual-region photodetectors with asymmetric temporal encoding for in-pixel motion sensing
 
 ## Abstract
 
