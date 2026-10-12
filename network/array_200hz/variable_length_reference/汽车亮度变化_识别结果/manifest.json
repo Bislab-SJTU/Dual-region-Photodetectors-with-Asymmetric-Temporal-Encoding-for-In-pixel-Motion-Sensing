@@ -1,0 +1,116 @@
+{
+  "source": "D:\\石阳\\博士工作\\科研\\周报\\week update-140-shiyang\\simulation_连续动态模型\\result\\亮度变化",
+  "trained_model": "D:\\石阳\\博士工作\\科研\\周报\\week update-140-shiyang\\局部波形_变长序列神经网络_200Hz\\best_model.pth",
+  "model_sha256": "0e57aa07a3a29619c2b3a8e04511e7fdd9f0e2824a6b678ce035f5538074937c",
+  "summary": [
+    {
+      "region": "all",
+      "edge": "both",
+      "n": 32400,
+      "correct": 32400,
+      "direction_consistency": 1.0,
+      "intensity_consistency": 1.0
+    },
+    {
+      "region": "all",
+      "edge": "rise",
+      "n": 16200,
+      "correct": 16200,
+      "direction_consistency": 1.0,
+      "intensity_consistency": 1.0
+    },
+    {
+      "region": "all",
+      "edge": "fall",
+      "n": 16200,
+      "correct": 16200,
+      "direction_consistency": 1.0,
+      "intensity_consistency": 1.0
+    },
+    {
+      "region": "left_50percent",
+      "edge": "both",
+      "n": 16200,
+      "correct": 16200,
+      "direction_consistency": 1.0,
+      "intensity_consistency": 1.0
+    },
+    {
+      "region": "left_50percent",
+      "edge": "rise",
+      "n": 8100,
+      "correct": 8100,
+      "direction_consistency": 1.0,
+      "intensity_consistency": 1.0
+    },
+    {
+      "region": "left_50percent",
+      "edge": "fall",
+      "n": 8100,
+      "correct": 8100,
+      "direction_consistency": 1.0,
+      "intensity_consistency": 1.0
+    },
+    {
+      "region": "right_10percent",
+      "edge": "both",
+      "n": 16200,
+      "correct": 16200,
+      "direction_consistency": 1.0,
+      "intensity_consistency": 1.0
+    },
+    {
+      "region": "right_10percent",
+      "edge": "rise",
+      "n": 8100,
+      "correct": 8100,
+      "direction_consistency": 1.0,
+      "intensity_consistency": 1.0
+    },
+    {
+      "region": "right_10percent",
+      "edge": "fall",
+      "n": 8100,
+      "correct": 8100,
+      "direction_consistency": 1.0,
+      "intensity_consistency": 1.0
+    }
+  ],
+  "no_time_stretching": true,
+  "no_endpoint_filling": true,
+  "no_direction_override": true,
+  "no_confidence_filter": true,
+  "actual_sequence_lengths": [
+    209,
+    210,
+    243
+  ],
+  "batch_padding_ignored": "packed GRU recurrence and masked attention; auxiliary statistics only use actual samples",
+  "input_sampling_interval_s": 1e-05,
+  "segmentation": "previous adaptive event boundaries, followed by identical measured dominant-edge alignment as experimental training; no other geometric edge in valid interval",
+  "limitations": [
+    "Same acquisition experimental split, not independent device/session validation.",
+    "Array generated from references in same acquisition; no simulated data used to train/select checkpoint.",
+    "Array ground truth direction only 0 deg.",
+    "Partial observations may not uniquely determine direction/frequency."
+  ],
+  "arrow_hold_s": 0.002,
+  "arrow_available_at": "input window end",
+  "arrow_style": {
+    "geometry": "unfilled open chevron made from two separate strokes",
+    "shaft_linewidth_points": 0.8,
+    "head_linewidth_points": 0.45,
+    "length_array_pixels": 1.8,
+    "tip_length_array_pixels": 0.7,
+    "tip_half_width_array_pixels": 0.48,
+    "line_cap": "butt",
+    "hold_s": 0.002,
+    "600dpi_frames_folder": "frames_600dpi_开放箭头_RGB33CC33",
+    "color_correct": "#33CC33",
+    "color_correct_rgb": [
+      51,
+      204,
+      51
+    ]
+  }
+}

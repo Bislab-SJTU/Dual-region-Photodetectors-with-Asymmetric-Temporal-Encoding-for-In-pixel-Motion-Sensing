@@ -1,0 +1,27 @@
+{
+  "kind": "mlp",
+  "initial_loss_preference": "cnn",
+  "selection": "highest minimum validation direction/intensity accuracy across full/65/85 prefixes, then lowest measured GPU latency; checkpoint selection uses validation only; test and array not used",
+  "validation_minimum_accuracies": {
+    "cnn": 1.0,
+    "mlp": 1.0
+  },
+  "labels": [
+    [
+      10,
+      50,
+      100
+    ],
+    [
+      0,
+      30,
+      60,
+      90,
+      120,
+      150,
+      180
+    ]
+  ],
+  "frequency_hz": 200,
+  "simulation_used_in_training_or_selection": false
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "mlp",
+  "best_epoch": 150,
+  "parameter_count": 17514,
+  "training_seconds": 9.609396099927835,
+  "selection": "validation mean direction accuracy then loss across full/65%/85%; test and simulation not used",
+  "seed": 42
+}

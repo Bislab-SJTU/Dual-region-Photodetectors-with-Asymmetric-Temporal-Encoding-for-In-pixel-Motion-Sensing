@@ -1,0 +1,13 @@
+{
+  "source_files_unique": true,
+  "paired_cycle_split_overlap": 0,
+  "all_seven_directions": true,
+  "all_three_intensities": true,
+  "simulation_files_in_experimental_training": 0,
+  "counts": {
+    "train": 4200,
+    "val": 1260,
+    "test": 1260
+  },
+  "qualification": "Held-out cycles from same acquisition, not independent sessions/devices"
+}

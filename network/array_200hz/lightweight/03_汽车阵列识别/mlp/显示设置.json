@@ -1,0 +1,15 @@
+{
+  "frames": 79,
+  "width": 3600,
+  "height": 2168,
+  "dpi": 600,
+  "arrow_duration_ms": 2,
+  "arrow_length_array_pixels": 1.8,
+  "arrow_rgb": [
+    51,
+    204,
+    51
+  ],
+  "open_arrowheads": true,
+  "no_axes_titles_or_margins": true
+}

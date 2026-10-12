@@ -1,0 +1,8 @@
+{
+  "kind": "cnn",
+  "best_epoch": 146,
+  "parameter_count": 9910,
+  "training_seconds": 14.516145500005223,
+  "selection": "validation mean direction accuracy then loss across full/65%/85%; test and simulation not used",
+  "seed": 42
+}
