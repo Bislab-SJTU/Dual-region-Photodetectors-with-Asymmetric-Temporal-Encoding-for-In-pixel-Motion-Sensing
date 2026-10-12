@@ -1,0 +1,80 @@
+{
+  "10": {
+    "n_branches": 4,
+    "offset_uA": -1.85377381932671,
+    "amplitudes_uA": [
+      61.33998855530038,
+      -27.07788327320948,
+      -42.85515445451032,
+      29.924516103129022
+    ],
+    "taus_ms": [
+      0.16822061839788474,
+      0.4388691130232096,
+      0.18951471592081356,
+      0.2275904495644475
+    ],
+    "taus_off_ms": [
+      0.17403836230152245,
+      0.13612997166857288,
+      0.48340717868216015,
+      0.5126733268132773
+    ],
+    "delays_ms": [
+      0.7509884115628265,
+      0.8258090665393893,
+      1.3398139250519592,
+      1.420325739625207
+    ],
+    "model": "empirical delayed state model with asymmetric charging/discharging rates",
+    "calibration_frequency_hz": 200,
+    "assumed_duty_cycle": 0.5,
+    "rmse_uA": 0.27444481015656935,
+    "nrmse_by_peak_to_peak": 0.005162366215282348,
+    "r_squared": 0.9996675706772762,
+    "optimizer_success": true,
+    "optimizer_message": "`ftol` termination condition is satisfied.",
+    "reference_path": "D:\\石阳\\博士工作\\科研\\周报\\week update-132-shiyang\\simulation\\响应曲线\\混合响应曲线-10%.csv",
+    "reference_sha256": "87333d6533f000af7904ec7fd8dc5bc2b8485250035957a9853cbe80fc2b8a67",
+    "raw_source": "D:\\石阳\\博士工作\\科研\\周报\\week update-65-shiyang\\gamry\\20250313\\night-1st test\\全部条件切分周期-auto-complete response\\peaks_auto_10%_0_200Hz\\cycle_1.csv"
+  },
+  "50": {
+    "n_branches": 4,
+    "offset_uA": -1.5082946571911287,
+    "amplitudes_uA": [
+      109.62470229870198,
+      25.132881406623362,
+      -16.294219767510157,
+      -13.233631314283436
+    ],
+    "taus_ms": [
+      0.04702149969595592,
+      0.009788190284341955,
+      0.12998299908677394,
+      0.018438367756247794
+    ],
+    "taus_off_ms": [
+      0.030244641636174116,
+      0.6001718116401811,
+      0.7032073501966587,
+      0.07637593430810626
+    ],
+    "delays_ms": [
+      0.7548155022711239,
+      0.7955572004335653,
+      1.2953428005253729,
+      1.345499615592012
+    ],
+    "model": "empirical delayed state model with asymmetric charging/discharging rates",
+    "calibration_frequency_hz": 200,
+    "assumed_duty_cycle": 0.5,
+    "rmse_uA": 1.3017059518487246,
+    "nrmse_by_peak_to_peak": 0.008475862114682601,
+    "r_squared": 0.9995013379944809,
+    "optimizer_success": true,
+    "optimizer_message": "`ftol` termination condition is satisfied.",
+    "reference_path": "D:\\石阳\\博士工作\\科研\\周报\\week update-132-shiyang\\simulation\\响应曲线\\混合响应曲线-50%.csv",
+    "reference_sha256": "68c40b5d9ddad19d860067cbd4c9bddea734ef43dea5bfbbec9d12e3976570ed",
+    "raw_source": "D:\\石阳\\博士工作\\科研\\周报\\week update-65-shiyang\\gamry\\20250313\\night-1st test\\全部条件切分周期-auto-complete response\\peaks_auto_50%_0_200Hz\\cycle_1.csv"
+  }
+}

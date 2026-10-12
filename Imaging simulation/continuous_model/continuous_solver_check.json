@@ -1,0 +1,16 @@
+[
+  {
+    "intensity_percent": 10,
+    "integration_dt_us": 0.5,
+    "periodic_numerical_vs_analytic_rmse_uA": 0.007030300323780701,
+    "state_min": 0.0,
+    "state_max": 0.9999996486337992
+  },
+  {
+    "intensity_percent": 50,
+    "integration_dt_us": 0.5,
+    "periodic_numerical_vs_analytic_rmse_uA": 0.06475266545587809,
+    "state_min": 0.0,
+    "state_max": 0.9999999999999989
+  }
+]
