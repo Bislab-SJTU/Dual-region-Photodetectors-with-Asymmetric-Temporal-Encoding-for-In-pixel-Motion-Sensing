@@ -1,0 +1,33 @@
+{
+  "source": "D:\\石阳\\博士工作\\科研\\周报\\week update-132-shiyang\\simulation\\result\\亮度变化",
+  "farneback": {
+    "pyr_scale": 0.2,
+    "levels": 3,
+    "winsize": 30,
+    "iterations": 3,
+    "poly_n": 7,
+    "poly_sigma": 1.5,
+    "flags": 256
+  },
+  "grid_step_image_px": 8,
+  "min_magnitude_image_px": 0.5,
+  "direction_tolerance_image_deg": 5,
+  "image_mapping": "original week132 steady-response PNGs, read unchanged as RGB then OpenCV grayscale; no current preprocessing during rerun",
+  "flow_units": "image pixels per successive source frame; raw dy positive downward",
+  "arrow_rgb_correct": [
+    51,
+    204,
+    51
+  ],
+  "arrow_rgb_other": [
+    237,
+    125,
+    49
+  ],
+  "frame_dpi": 600,
+  "video_fps": 15,
+  "summary_interpretation": "direction agreement among thresholded sampled vectors; not all-pixel accuracy, not NN event accuracy",
+  "python": "3.13.0",
+  "opencv": "4.11.0",
+  "numpy": "2.1.3"
+}

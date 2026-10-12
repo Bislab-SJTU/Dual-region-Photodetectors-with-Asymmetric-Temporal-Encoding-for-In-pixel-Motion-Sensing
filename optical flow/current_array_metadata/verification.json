@@ -1,0 +1,13 @@
+[
+  {
+    "branch": "稳态响应",
+    "source_frames": 79,
+    "dimensions": [
+      200,
+      332,
+      3
+    ],
+    "source_role": "original week132 steady-response frames; no regenerated or hybrid array",
+    "timing_note": "200 samples/frame from historical renderer; exact times from pixel_40_40.csv; flow units pixels/frame"
+  }
+]
