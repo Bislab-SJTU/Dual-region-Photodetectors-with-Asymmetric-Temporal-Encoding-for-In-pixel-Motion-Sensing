@@ -1,508 +1,202 @@
-# -*- coding: utf-8 -*-
-"""
-阵列模拟—稳态响应—带 mask & 透明区打孔（多事件版：每次不透明进入都触发一次完整波形）
-根据原始波形的 S2、S3、S4 三段映射：
-- S2: 原始波形 0.000716s→0.001453s
-- S3: 由每次接触到的完全不透明光源实际长度减去 PIX_W，再除以速度得到时长，
-      线性衔接 S2 末端与 S4 起始电流
-- S4: 原始波形 0.003219s→0.003956s
-最终只打印**全局**最短接触长度与 PIX_W 的比较结果。
-"""
-import os
-import sys
-from typing import Tuple, Optional
-
+from pathlib import Path
+from collections import OrderedDict
+import sys,json,hashlib,shutil,importlib.util
 import numpy as np
 import pandas as pd
 import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-from matplotlib.animation import FuncAnimation, FFMpegWriter
-from matplotlib.patches import Rectangle
-from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
-
-import tkinter as tk
-from tkinter import filedialog
-
-import matplotlib.image as mpimg
 from PIL import Image
+import imageio_ffmpeg
 
-# —— 中文 & 负号 ——
-# matplotlib.rcParams['font.sans-serif'] = ['SimHei']
-# matplotlib.rcParams['axes.unicode_minus'] = False
+sys.stdout.reconfigure(encoding='utf-8')
+BASE=Path(r'D:\石阳\博士工作\科研\周报')
+OLD=BASE/'week update-132-shiyang/simulation'
+FIT=BASE/'week update-140-shiyang/200Hz_10与50光强_连续动态拟合'
+ROOT=BASE/'week update-140-shiyang/simulation_连续动态模型'
+ROOT.mkdir(exist_ok=True)
+RESULT=ROOT/'result/亮度变化'
+CODE=ROOT/'code';CODE.mkdir(exist_ok=True)
+CONFIG={'rows':100,'cols':100,'pixel_width_mm':5.4,'pixel_height_mm':3.25,'pixel_spacing_mm':.5,'array_center_x_mm':4.,'start_x_mm':-850.,'start_y_mm':-80.,'move_distance_mm':1150.,'speed_mm_s':7330.4,'motion_angle_deg':0.,'image_scale_factor':15.,'nominal_dt_s':1e-5,'time_scale':.03,'video_fps':15,'brightness_boundary_column':50,'left_reference_percent':50,'right_reference_percent':10,'occlusion_enabled':False,'reference_event_anchor_s':.000716,'current_display_vmax_uA':135.,'illumination_sampling':'same point / opaque-alpha>=1 rule as previous generator','model_role':'empirical combined hybrid response calibrated at 0deg,200Hz; no separate RC/C identification','network_inference_performed':False}
+PARAMS=json.loads((FIT/'fitted_parameters.json').read_text(encoding='utf-8'))
+plt.rcParams.update({'font.family':'Microsoft YaHei','axes.unicode_minus':False,'font.size':11})
+ts=np.linspace(0,CONFIG['move_distance_mm']/CONFIG['speed_mm_s'],int((CONFIG['move_distance_mm']/CONFIG['speed_mm_s'])/CONFIG['nominal_dt_s'])+1)
+dt=ts[1]-ts[0]
+step=max(1,int((.03/15)/1e-5));frame_idx=np.arange(0,len(ts),step);frame_times=ts[frame_idx]
+im=Image.open(OLD/'car_bin.png');dpi=im.info['dpi'][0];mm_per_px=25.4/dpi
+rgba=np.array(im.convert('RGBA'));alpha=np.flipud(rgba[:,:,3])/255.;height,width=alpha.shape
+image_w=width*mm_per_px*15;image_h=height*mm_per_px*15
+CONFIG.update({'image_dpi':dpi,'image_width_mm':image_w,'image_height_mm':image_h,'actual_dt_s':float(dt),'time_samples':len(ts),'frame_count':len(frame_idx),'frame_sample_step':int(step),'first_x_mm':4-(100*5.4+99*.5)/2})
+xpos=CONFIG['first_x_mm']+np.arange(100)*5.9
+ypos=np.arange(100)*3.75
+u_index=np.trunc((xpos[:,None]-(-850+7330.4*ts[None,:]))/image_w*width).astype(int)
+v_index=np.trunc((ypos+80)/image_h*height).astype(int)
+valid_u=(u_index>=0)&(u_index<width)
 
-# —— 配置参数 ——
-TIME_SCALE       = 0.03        # 视频中 1 秒 对应 仿真秒数
-VIDEO_FPS        = 30          # 动画帧率
-VIDEO_DPI        = 400         # MP4 输出 DPI
-VIEW_MARGIN_FACTOR = 8.0      # 视图边距因子
+def events_from_mask(mask):
+    starts=np.flatnonzero(mask & ~np.r_[False,mask[:-1]])
+    ends=np.flatnonzero(mask & ~np.r_[mask[1:],False])+1
+    return list(zip(starts.tolist(),ends.tolist()))
 
-# 光源运动参数
-START_X, START_Y = -850.0, -80.0  # 光源初始位置 (mm)
-MOVE_DIST        = 1150.0       # 光源移动总距离 (mm)
-ANGLE_DEG        = 0.0          # 光源运动角度 (deg)
-SPEED            = 7330.4       # 光源运动速度 (mm/s)
-OFFSET_WT        = 0.000716     # 波形时间偏移 (s)
+def pixel_mask(r,c):
+    if not 0<=v_index[r]<height:return np.zeros(len(ts),bool)
+    return valid_u[c] & (alpha[v_index[r],np.clip(u_index[c],0,width-1)]>=1)
 
-# 图片缩放参数：在物理尺寸基础上的额外比例
-IMG_SCALE_FACTOR = 15.0         # 1.0 保持原始物理尺寸
+def dynamic_current(times,event_times,params,reference_anchor_s=.000716):
+    """Exact evolution of the fitted state model across piecewise-constant illumination.
 
-# 像素阵列参数
-N_COL, N_ROW     = 100, 100     # 像素阵列列数、行数
-PIX_W, PIX_H     = 5.4, 3.25    # 像素总宽度、高度 (mm)
-LEFT_W           = 0.5          # 像素左侧部分宽度 (mm)
-PIX_SPACING      = 0.5          # 像素间距 (mm)
-
-# 遮罩区域
-MASK_X0, MASK_Y0       = -150.0, 130.0  # 遮罩区域左下角坐标 (mm)
-MASK_WIDTH, MASK_HEIGHT = 300.0, 150.0  # 遮罩区域尺寸 (mm)
-
-# GRID 输出尺寸
-SUBPLOT_W_INCH   = 1.5         # 子图宽度 (inch)
-SUBPLOT_H_INCH   = 1.5         # 子图高度 (inch)
-
-
-def get_mm_per_px(img_path: str) -> Optional[float]:
+    Remove reference-cycle phase once. Delays retained between branches are empirical;
+    do not add another sub-unit geometric delay to this combined response model.
     """
-    从图像 DPI 元数据读取像素→毫米比例，否则返回 None
-    """
-    with Image.open(img_path) as im:
-        info = im.info
-        dpi = info.get('dpi')
-        if isinstance(dpi, tuple) and dpi[0] > 0:
-            return 25.4 / dpi[0]
-    return None
+    output=np.full(len(times),params['offset_uA'],float)
+    for amp,tau_on,tau_off,delay_ms in zip(params['amplitudes_uA'],params['taus_ms'],params['taus_off_ms'],params['delays_ms']):
+        delay=delay_ms*.001-reference_anchor_s
+        if delay<0:raise ValueError('Calibration phase yields a negative causal delay')
+        edge_times=[];drives=[]
+        for a,b in event_times:edge_times.extend([a+delay,b+delay]);drives.extend([1.,0.])
+        state=0.;previous=times[0];drive=0.
+        values=np.empty(len(times),float)
+        for boundary,next_drive in zip(edge_times+[times[-1]+(times[1]-times[0])],drives+[0.]):
+            if boundary<previous:raise ValueError('Overlapping/unsorted input events')
+            lo=np.searchsorted(times,previous,side='left');hi=np.searchsorted(times,boundary,side='left')
+            tau=(tau_on if drive else tau_off)*.001
+            values[lo:hi]=drive+(state-drive)*np.exp(-(times[lo:hi]-previous)/tau)
+            state=drive+(state-drive)*np.exp(-(boundary-previous)/tau)
+            previous=boundary;drive=next_drive
+            if boundary>times[-1]:break
+        output+=amp*values
+    return output*1e-6
 
+STEADY={i:pd.read_csv(OLD/'响应曲线'/f'持续响应曲线-{i}%.csv') for i in [10,50]}
+def old_steady_response(events,light):
+    d=STEADY[light];rt=d.Time_s.to_numpy();ry=d.Current_A.to_numpy();series=np.zeros(len(ts));s2=.000737;s4=.000737
+    i2=np.interp(.000716+s2,rt,ry);i4=np.interp(.003219,rt,ry)
+    for a,b in events:
+        length=7330.4*(ts[b-1]-ts[a]);excess=max(0,length-5.4)/7330.4;total=s2+excess+s4
+        end=np.searchsorted(ts,ts[a]+total,side='left');local=ts[a:end]-ts[a]
+        vals=np.empty(len(local));rise=local<s2;plateau=(local>=s2)&(local<s2+excess);fall=~(rise|plateau)
+        vals[rise]=np.interp(.000716+local[rise],rt,ry,right=ry[-1])
+        if excess>0:vals[plateau]=i2+(local[plateau]-s2)/excess*(i4-i2)
+        vals[fall]=np.interp(.003219+local[fall]-s2-excess,rt,ry,right=ry[-1])
+        series[a:end]=vals
+    return series
 
-def simulate_pixel_response(
-    ts: np.ndarray,
-    t_vals: np.ndarray,
-    I_vals: np.ndarray,
-    pix_left: float,
-    pix_right: float,
-    pix_bottom: float,
-    pix_top: float,
-    start_x: float,
-    start_y: float,
-    vx: float,
-    vy: float,
-    offset_wt: float,
-    last_current: float,
-    alpha_channel: np.ndarray,
-    w_px: int,
-    h_px: int,
-    insertion_offset: float = 0.000737
-) -> Tuple[np.ndarray, Optional[float]]:
-    """
-    模拟单个像素响应并返回电流波形与最短接触长度
-    """
-    N = len(ts)
-    I_out = np.zeros(N)
-    mask = np.zeros(N, dtype=bool)
+TIME_PREFIX=[f'{value:.12g},' for value in ts]
+CSV_CACHE_PATHS={}
+def complete_csv(path):
+    if not path.exists() or path.stat().st_size<100:return False
+    try:
+        with path.open('rb') as handle:
+            handle.seek(max(0,path.stat().st_size-128));line=handle.read().decode('ascii').splitlines()[-1]
+        parts=line.split(',')
+        return len(parts)==2 and parts[0]==format(ts[-1],'.12g') and np.isfinite(float(parts[1]))
+    except (OSError,ValueError,UnicodeError):return False
 
-    for i, t in enumerate(ts):
-        x_l = start_x + vx * t
-        y_l = start_y + vy * t
+def save_csv(path,series,cache_key):
+    if complete_csv(path):
+        CSV_CACHE_PATHS.setdefault(cache_key,path);return
+    if cache_key in CSV_CACHE_PATHS:
+        shutil.copyfile(CSV_CACHE_PATHS[cache_key],path);return
+    temp=path.with_suffix('.tmp')
+    temp.write_text('Time_s,Current_A\n'+''.join(prefix+format(value,'.12g')+'\n' for prefix,value in zip(TIME_PREFIX,series)),encoding='ascii')
+    temp.replace(path);CSV_CACHE_PATHS[cache_key]=path
 
-        # 计算对应图像像素坐标
-        u0 = int(
-            ((pix_left - x_l) /
-             (w_px * mm_per_px * IMG_SCALE_FACTOR))
-            * w_px
-        )
-        v0 = int(
-            ((pix_bottom - y_l) /
-             (h_px * mm_per_px * IMG_SCALE_FACTOR))
-            * h_px
-        )
-
-        u0, u1 = max(0, u0), min(w_px, u0 + 1)
-        v0, v1 = max(0, v0), min(h_px, v0 + 1)
-
-        # 如果对应像素 alpha >= 1，则认为有接触
-        if u0 < u1 and v0 < v1 and np.any(alpha_ch[v0:v1, u0:u1] >= 1.0):
-            mask[i] = True
-
-    event_starts = np.where(
-        mask & ~np.concatenate(([False], mask[:-1]))
-    )[0]
-    speed = np.hypot(vx, vy)
-    s2 = insertion_offset
-    s4s = 0.003219
-    s4 = 0.003956 - s4s
-
-    lengths = []
-    for idx0 in event_starts:
-        # 找到事件结束的索引
-        if np.any(~mask[idx0:]):
-            end_idx = idx0 + np.argmax(~mask[idx0:])
-        else:
-            end_idx = N
-
-        length = speed * (ts[end_idx - 1] - ts[idx0])
-        lengths.append(length)
-
-        # 计算平台时长
-        excess = max(0, length - PIX_W) / speed
-        I2 = np.interp(offset_wt + s2, t_vals, I_vals)
-        I4 = np.interp(s4s, t_vals, I_vals)
-        total_t = s2 + excess + s4
-
-        # 填充 I_out
-        for k, dt in enumerate(ts[idx0:] - ts[idx0]):
-            if dt >= total_t:
-                break
-            j = idx0 + k
-            if dt < s2:
-                I_out[j] = np.interp(
-                    offset_wt + dt, t_vals, I_vals,
-                    right=last_current
-                )
-            elif dt < s2 + excess:
-                frac = (dt - s2) / excess if excess > 0 else 1
-                I_out[j] = I2 + frac * (I4 - I2)
+if __name__=='__main__':
+    # Verify scene timing against existing waveforms before creating the large output set.
+    checks=[]
+    for r,c in [(20,20),(30,30),(50,30),(50,70),(70,85),(0,0)]:
+        events=events_from_mask(pixel_mask(r,c))
+        previous=pd.read_csv(OLD/f'result/亮度变化/混合响应/pixel_waveforms/pixel_{r}_{c}.csv')
+        assert np.allclose(previous.Time_s,ts,atol=1e-12,rtol=0)
+        starts=np.flatnonzero((previous.Current_A.to_numpy()!=0)&~np.r_[False,previous.Current_A.to_numpy()[:-1]!=0])
+        assert starts.tolist()==[a for a,b in events],(r,c,starts,events)
+        old_s=pd.read_csv(OLD/f'result/亮度变化/稳态响应/pixel_waveforms/pixel_{r}_{c}.csv').Current_A.to_numpy()
+        error=float(np.max(np.abs(old_steady_response(events,50 if c<50 else 10)-old_s)))
+        assert error<1e-12,(r,c,error)
+        checks.append({'row':r,'col':c,'event_onsets_match_previous':True,'steady_max_difference_A':error})
+    print('Scene timing and steady-control checks passed',flush=True)
+    # Check event integrator against the fitted periodic analytic solution.
+    spec=importlib.util.spec_from_file_location('fit',FIT/'fit_array_response_dynamics.py');fit=importlib.util.module_from_spec(spec);spec.loader.exec_module(fit)
+    test_times=np.arange(0,.05,1e-5);test_events=[(k*.005,k*.005+.0025) for k in range(10)]
+    for light in [10,50]:
+        y=dynamic_current(test_times,test_events,PARAMS[str(light)])*1e6;tail=test_times>=.045;expected=fit.predict_periodic((test_times[tail]+.000716)*1000,PARAMS[str(light)])
+        err=float(np.sqrt(np.mean((y[tail]-expected)**2)));assert err<1e-5
+        checks.append({'light_percent':light,'continuous_vs_periodic_rmse_uA':err})
+    outputs={};cubes={};cache=OrderedDict();event_rows=[];status_rows=[]
+    for kind in ['混合响应','稳态响应']:
+        folder=RESULT/kind;folder.mkdir(parents=True,exist_ok=True);(folder/'pixel_waveforms').mkdir(exist_ok=True)
+        outputs[kind]=folder
+        cubes[kind]=np.lib.format.open_memmap(folder/'array_current_A.npy',mode='w+',dtype=np.float32,shape=(100,100,len(ts)))
+    for r in range(100):
+        for c in range(100):
+            light=50 if c<50 else 10;events=events_from_mask(pixel_mask(r,c));key=(light,tuple(events))
+            if key in cache:
+                hybrid,steady=cache.pop(key);cache[key]=(hybrid,steady)
             else:
-                I_out[j] = np.interp(
-                    s4s + (dt - s2 - excess),
-                    t_vals, I_vals,
-                    right=last_current
-                )
-
-    return I_out, (min(lengths) if lengths else None)
-
-
-# —— 读取波形 CSV ——
-root = tk.Tk()
-root.withdraw()
-csv_path = filedialog.askopenfilename(
-    title="选择电流波形 CSV",
-    filetypes=[("CSV", "*.csv")]
-)
-root.destroy()
-if not csv_path:
-    raise SystemExit("未选择 CSV 文件")
-
-df = pd.read_csv(csv_path)
-t_vals = df['Time_s'].to_numpy()
-I_vals = df['Current_A'].to_numpy()
-offset_cur = I_vals[np.abs(t_vals - OFFSET_WT).argmin()]
-last_cur = I_vals[-1]
-
-# —— 读取图片并计算物理尺寸 ——
-root = tk.Tk()
-root.withdraw()
-img_path = filedialog.askopenfilename(
-    title="选择光源图片",
-    filetypes=[("Image", "*.png;*.jpg;*.bmp")]
-)
-root.destroy()
-light_img = mpimg.imread(img_path)
-h_px, w_px = light_img.shape[:2]
-mm_per_px = get_mm_per_px(img_path)
-if mm_per_px is None:
-    print("未检出 DPI，程序退出。")
-    sys.exit(1)
-
-# 应用缩放倍数后的实际尺寸
-img_w_mm = w_px * mm_per_px * IMG_SCALE_FACTOR
-img_h_mm = h_px * mm_per_px * IMG_SCALE_FACTOR
-
-# 如果图像没有 alpha 通道，则创建全 1 的 alpha
-if light_img.ndim == 3 and light_img.shape[2] == 3:
-    alpha = np.ones((h_px, w_px))
-    light_img = np.dstack([light_img, alpha])
-
-alpha_ch = np.flipud(light_img[:, :, 3])
-
-# —— 时间与运动 ——
-dt = 1e-5
-sim_t_end = MOVE_DIST / SPEED
-ts_all = np.linspace(
-    0, sim_t_end, int(sim_t_end / dt) + 1
-)
-theta = np.deg2rad(ANGLE_DEG)
-vx = SPEED * np.cos(theta)
-vy = SPEED * np.sin(theta)
-frame_idxs = list(
-    range(
-        0,
-        len(ts_all),
-        max(1, int((TIME_SCALE / VIDEO_FPS) / dt))
-    )
-)
-
-# —— 像素阵列布局 ——
-center = (800 / 2) / 100
-tw = N_COL * PIX_W + (N_COL - 1) * PIX_SPACING
-first_x = center - tw / 2
-pix_lefts = [
-    first_x + i * (PIX_W + PIX_SPACING)
-    for i in range(N_COL)
-]
-pix_tops = [
-    j * (PIX_H + PIX_SPACING)
-    for j in range(N_ROW)
-]
-
-# —— 预览动画 ——
-fig, ax = plt.subplots(figsize=(8, 5), constrained_layout=True)
-ax.set_aspect('equal')
-
-mx = (PIX_W + PIX_SPACING) * VIEW_MARGIN_FACTOR
-my = (PIX_H + PIX_SPACING) * VIEW_MARGIN_FACTOR
-ax.set_xlim(first_x - mx, first_x + tw + mx)
-ax.set_ylim(-my, N_ROW * (PIX_H + PIX_SPACING) - PIX_SPACING + my)
-
-# 绘制像素阵列
-for x0 in pix_lefts:
-    for y0 in pix_tops:
-        ax.add_patch(
-            Rectangle((x0, y0), LEFT_W, PIX_H,
-                      facecolor='red', alpha=0.8)
-        )
-        ax.add_patch(
-            Rectangle((x0 + LEFT_W, y0),
-                      PIX_W - LEFT_W, PIX_H,
-                      facecolor='blue', alpha=0.8)
-        )
-
-# 绘制遮罩区域
-ax.add_patch(
-    Rectangle(
-        (MASK_X0, MASK_Y0),
-        MASK_WIDTH, MASK_HEIGHT,
-        facecolor='black', edgecolor='none',
-        alpha=1.0
-    )
-)
-
-# 显示光源图片
-light_im = ax.imshow(
-    light_img,
-    extent=(START_X, START_X + img_w_mm,
-            START_Y, START_Y + img_h_mm),
-    origin='upper',
-    aspect='equal',
-    alpha=1,
-    zorder=2
-)
-ax.set_title("Pattern motion schematic")
-ax.set_xlabel("X position (mm)")
-ax.set_ylabel("Y position (mm)")
-
-time_text = ax.text(
-    0.02, 0.95, '', color="red", 
-    transform=ax.transAxes
-)
-
-
-def update(i):
-    t = ts_all[i]
-    x0 = START_X + vx * t
-    y0 = START_Y + vy * t
-
-    light_im.set_extent(
-        (x0, x0 + img_w_mm, y0, y0 + img_h_mm)
-    )
-    time_text.set_text(f"t={t:.6f}s")
-    return light_im, time_text
-
-
-anim = FuncAnimation(
-    fig, update, frames=frame_idxs,
-    interval=1000 / VIDEO_FPS, blit=False
-)
-plt.show()
-
-# —— 输出 CSV/GRID/MP4 ——
-choices = input(
-    "生成哪些？CSV,GRID,MP4 或 ALL："
-).upper().split(',')
-want_csv = 'CSV' in choices or 'ALL' in choices
-want_grid = 'GRID' in choices or 'ALL' in choices
-want_mp4 = 'MP4' in choices or 'ALL' in choices
-
-out_dir = os.getcwd()
-
-if want_mp4:
-    fig2, ax2 = plt.subplots(
-        figsize=(8, 5), constrained_layout=True
-    )
-    ax2.set_aspect('equal')
-
-    ax2.set_title("Pattern motion schematic")
-    ax2.set_xlabel("X position (mm)")
-    ax2.set_ylabel("Y position (mm)")
-
-    ax2.set_xlim(first_x - mx, first_x + tw + mx)
-    ax2.set_ylim(
-        -my,
-        N_ROW * (PIX_H + PIX_SPACING) - PIX_SPACING + my
-    )
-
-    # 绘制像素阵列
-    for x0 in pix_lefts:
-        for y0 in pix_tops:
-            ax2.add_patch(
-                Rectangle((x0, y0), LEFT_W, PIX_H,
-                          facecolor='red',
-                          alpha=0.8,
-                          zorder=2)
-            )
-            ax2.add_patch(
-                Rectangle((x0 + LEFT_W, y0),
-                          PIX_W - LEFT_W, PIX_H,
-                          facecolor='blue',
-                          alpha=0.8,
-                          zorder=2)
-            )
-
-    # 遮罩区
-    ax2.add_patch(
-        Rectangle(
-            (MASK_X0, MASK_Y0),
-            MASK_WIDTH, MASK_HEIGHT,
-            facecolor='black',
-            edgecolor='none',
-            alpha=1.0,
-            zorder=2
-        )
-    )
-
-    lm2 = ax2.imshow(
-        light_img,
-        extent=(START_X, START_X + img_w_mm,
-                START_Y, START_Y + img_h_mm),
-        origin='upper',
-        aspect='equal',
-        alpha=1,
-        zorder=3
-    )
-    tt2 = ax2.text(
-        0.02, 0.95, '',
-        transform=ax2.transAxes,
-        zorder=4
-    )
-    canvas2 = FigureCanvas(fig2)
-    writer = FFMpegWriter(fps=VIDEO_FPS)
-
-    with writer.saving(
-        fig2,
-        os.path.join(out_dir, 'light_motion.mp4'),
-        dpi=VIDEO_DPI
-    ):
-        for i in frame_idxs:
-            t = ts_all[i]
-            x0 = START_X + vx * t
-            y0 = START_Y + vy * t
-
-            lm2.remove()
-            lm2 = ax2.imshow(
-                light_img,
-                extent=(x0, x0 + img_w_mm,
-                        y0, y0 + img_h_mm),
-                origin='upper',
-                aspect='equal',
-                alpha=1,
-                zorder=3
-            )
-            tt2.set_text(f"t={t:.6f}s")
-            canvas2.draw()
-            writer.grab_frame()
-
-    print(
-        '已保存 MP4→',
-        os.path.join(out_dir, 'light_motion.mp4')
-    )
-    plt.close(fig2)
-
-if want_csv or want_grid:
-    I_grid = np.zeros((N_ROW, N_COL, len(ts_all)))
-    wave_dir = os.path.join(out_dir, 'pixel_waveforms')
-    if want_csv:
-        os.makedirs(wave_dir, exist_ok=True)
-    
-    all_l = []
-    occluded_pixels = []
-    for c, x0 in enumerate(pix_lefts):
-        for r, y0 in enumerate(pix_tops):
-            x1, y1 = x0 + PIX_W, y0 + PIX_H
-
-            # 如果在遮罩区内，波形置零
-            if (x0 < MASK_X0 + MASK_WIDTH and
-                x1 > MASK_X0 and
-                y0 < MASK_Y0 + MASK_HEIGHT and
-                y1 > MASK_Y0):
-                series, minl = np.zeros(len(ts_all)), None
-            # 记录被遮挡的像素
-                occluded_pixels.append({'row': r, 'col': c})
-            else:
-                series, minl = simulate_pixel_response(
-                    ts_all, t_vals, I_vals,
-                    x0, x1, y0, y1,
-                    START_X, START_Y,
-                    vx, vy,
-                    OFFSET_WT,
-                    last_cur,
-                    alpha_ch,
-                    w_px, h_px
-                )
-
-            I_grid[r, c] = series
-            if minl is not None:
-                all_l.append(minl)
-
-            if want_csv:
-                pd.DataFrame({
-                    'Time_s': ts_all,
-                    'Current_A': series
-                }).to_csv(
-                    os.path.join(
-                        wave_dir,
-                        f'pixel_{r}_{c}.csv'
-                    ),
-                    index=False
-                )
-    # 在这里将 occluded_pixels 列表写成 CSV
-    if occluded_pixels:
-        df_occl = pd.DataFrame(occluded_pixels)
-        occl_path = os.path.join(out_dir, 'occluded_pixels.csv')
-        df_occl.to_csv(occl_path, index=False)
-        print(f'已保存被遮挡像素列表 → {occl_path}')
-    else:
-        print('没有检测到被遮挡的像素。')
-
-    # 打印全局最短接触长度
-    if all_l:
-        gm = min(all_l)
-        comp = '>' if gm > PIX_W else '≤'
-        print(
-            f"全局最短接触长度 {gm:.4f}mm "
-            f"{comp} PIX_W({PIX_W}mm)"
-        )
-
-    if want_grid:
-        fig_g, axes = plt.subplots(
-            N_ROW, N_COL,
-            figsize=(
-                N_COL * SUBPLOT_W_INCH,
-                N_ROW * SUBPLOT_H_INCH
-            ),
-            squeeze=False
-        )
-        axes = axes[::-1, :]
-        for r in range(N_ROW):
-            for c in range(N_COL):
-                axg = axes[r, c]
-                axg.plot(ts_all, I_grid[r, c], lw=0.8)
-                axg.set_title(f'({r},{c})', fontsize=6)
-                axg.tick_params(labelsize=4)
-                axg.set_xlabel('Time(s)', fontsize=5)
-                axg.set_ylabel('Current(A)', fontsize=5)
-
-        fig_g.tight_layout()
-        png = os.path.join(
-            out_dir, 'pixel_waveforms_grid.png'
-        )
-        fig_g.savefig(png, dpi=200)
-        plt.close(fig_g)
-        print('已保存 GRID→', png)
+                event_times=[(float(ts[a]),float(ts[b]) if b<len(ts) else float(ts[-1]+dt)) for a,b in events]
+                hybrid=dynamic_current(ts,event_times,PARAMS[str(light)])
+                steady=old_steady_response(events,light)
+                cache[key]=(hybrid,steady)
+                if len(cache)>64:cache.popitem(last=False)
+            assert np.isfinite(hybrid).all() and np.isfinite(steady).all()
+            for kind,series in [('混合响应',hybrid),('稳态响应',steady)]:
+                cubes[kind][r,c]=series
+                save_csv(outputs[kind]/'pixel_waveforms'/f'pixel_{r}_{c}.csv',series,(kind,key))
+            status_rows.append({'row':r,'col':c,'reference_light_percent':light,'event_count':len(events),'status':'active' if events else 'no_optical_event'})
+            for number,(a,b) in enumerate(events):
+                event_rows.append({'row':r,'col':c,'event_id':number,'reference_light_percent':light,'input_on_index':a,'input_off_index_exclusive':b,'input_on_s':ts[a],'input_off_s':ts[b] if b<len(ts) else ts[-1]+dt})
+        if (r+1)%10==0:print('Generated rows',r+1,'/100; CSVs',(r+1)*200,flush=True)
+    for cube in cubes.values():cube.flush()
+    pd.DataFrame(event_rows).to_csv(RESULT/'illumination_events.csv',index=False,encoding='utf-8-sig')
+    pd.DataFrame(status_rows).to_csv(RESULT/'pixel_status.csv',index=False,encoding='utf-8-sig')
+    np.save(RESULT/'time_s.npy',ts);pd.DataFrame({'Time_s':ts}).to_csv(RESULT/'time_axis.csv',index=False,float_format='%.12g')
+    pd.DataFrame({'frame':np.arange(len(frame_idx)),'sample_index':frame_idx,'Time_s':frame_times}).to_csv(RESULT/'frame_times.csv',index=False)
+    # Regenerate the same plain current frames. Arrow/flow frames belong to later inference.
+    cmap=matplotlib.colormaps['Blues'];aspect=5.4/3.25;frame_size=(int(100*aspect)*2,200)
+    def current_image(current):
+        rgb=(cmap(np.clip(np.flipud(np.abs(current))*1e6/135.,0,1))[:,:,:3]*255).astype('uint8')
+        return Image.fromarray(rgb).resize(frame_size,Image.Resampling.NEAREST)
+    for kind,folder in outputs.items():
+        frames=folder/'frames';frames.mkdir(exist_ok=True);images=[]
+        writer=imageio_ffmpeg.write_frames(str(folder/'array_current.mp4'),frame_size,fps=15,codec='libx264',pix_fmt_in='rgb24',pix_fmt_out='yuv420p',macro_block_size=2);writer.send(None)
+        for fi,index in enumerate(frame_idx):
+            image=current_image(cubes[kind][:,:,index]);image.save(frames/f'frame_{fi:04d}.png');writer.send(np.asarray(image));images.append(image)
+        writer.close();images[0].save(folder/'array_current.gif',save_all=True,append_images=images[1:],duration=67,loop=0)
+        fig,axs=plt.subplots(1,5,figsize=(15,3.3))
+        for ax,fi in zip(axs,[8,18,32,52,68]):ax.imshow(images[fi]);ax.set_title(f'{frame_times[fi]*1000:.1f} ms');ax.axis('off')
+        fig.suptitle(f'{kind}｜电流幅值图，色标0–135 µA｜连续动态模型' if kind=='混合响应' else f'{kind}｜沿用原稳态对照模型');fig.tight_layout();fig.savefig(folder/'five_frame_current.png',dpi=200);plt.close(fig)
+        print('Saved frames/video',kind,flush=True)
+    # Optical scene uses the same spatial brightness boundary as the electrical simulation.
+    optical=RESULT/'光照场景';optical.mkdir(exist_ok=True);(optical/'frames').mkdir(exist_ok=True)
+    optical_frames=[];optical_size=(660,400)
+    ow=imageio_ffmpeg.write_frames(str(optical/'light_motion.mp4'),optical_size,fps=15,codec='libx264',pix_fmt_in='rgb24',pix_fmt_out='yuv420p',macro_block_size=2);ow.send(None)
+    for fi,index in enumerate(frame_idx):
+        illuminated=np.zeros((100,100),float)
+        for r in range(100):
+            if 0<=v_index[r]<height:illuminated[r]=valid_u[:,index]*(alpha[v_index[r],np.clip(u_index[:,index],0,width-1)]>=1)
+        illuminated[:,50:]*=.2
+        rgb=(cmap(np.flipud(illuminated)*.8)[:,:,:3]*255).astype('uint8')
+        image=Image.fromarray(rgb).resize(optical_size,Image.Resampling.NEAREST);image.save(optical/'frames'/f'frame_{fi:04d}.png');optical_frames.append(image);ow.send(np.asarray(image))
+    ow.close();optical_frames[0].save(optical/'light_motion.gif',save_all=True,append_images=optical_frames[1:],duration=67,loop=0)
+    # Representative complete waveforms and departure-tail check.
+    fig,axs=plt.subplots(2,2,figsize=(14,8))
+    for row,c in enumerate([30,70]):
+        ev=events_from_mask(pixel_mask(50,c));new=cubes['混合响应'][50,c].astype(float);old=pd.read_csv(OLD/f'result/亮度变化/混合响应/pixel_waveforms/pixel_50_{c}.csv').Current_A.to_numpy()
+        axs[row,0].plot(ts*1e3,old*1e6,color='grey',label='原拼接模型');axs[row,0].plot(ts*1e3,new*1e6,color='#1664b5',label='新连续动态模型');axs[row,0].set(title=f'像素(50,{c})｜{50 if c<50 else 10}% 光强',xlabel='时间(ms)',ylabel='电流(µA)');axs[row,0].legend()
+        off=ts[ev[-1][1]];sel=(ts>=off-.001)&(ts<=off+.004);axs[row,1].plot((ts[sel]-off)*1e3,old[sel]*1e6,color='grey',label='原拼接模型');axs[row,1].plot((ts[sel]-off)*1e3,new[sel]*1e6,color='#1664b5',label='新连续动态模型');axs[row,1].set(title='离开后的恢复尾部',xlabel='相对光照离开的时间(ms)',ylabel='电流(µA)');axs[row,1].legend()
+    for ax in axs.flat:ax.grid(alpha=.2)
+    fig.tight_layout();fig.savefig(ROOT/'新旧模拟波形与恢复尾部对比.png',dpi=200);plt.close(fig)
+    # Read exported CSVs back and compare with in-memory high-precision output.
+    for r,c in [(0,0),(30,30),(50,30),(50,70),(70,85),(99,99)]:
+        for kind in outputs:
+            f=outputs[kind]/'pixel_waveforms'/f'pixel_{r}_{c}.csv';d=pd.read_csv(f)
+            assert len(d)==len(ts) and list(d.columns)==['Time_s','Current_A']
+            assert np.max(np.abs(d.Time_s.to_numpy()-ts))<1e-12
+            assert np.max(np.abs(d.Current_A.to_numpy()-cubes[kind][r,c]))<2e-11
+    for kind in outputs:
+        assert len(list((outputs[kind]/'pixel_waveforms').glob('pixel_*.csv')))==10000
+        assert len(list((outputs[kind]/'frames').glob('*.png')))==79
+    manifest={'configuration':CONFIG,'hybrid_parameters':PARAMS,'model_parameter_sha256':hashlib.sha256((FIT/'fitted_parameters.json').read_bytes()).hexdigest(),'car_image_sha256':hashlib.sha256((OLD/'car_bin.png').read_bytes()).hexdigest(),'scene_and_integrator_checks':checks,'total_pixels_per_response':10000,'samples_per_pixel':len(ts),'input_events':len(event_rows),'active_pixels':sum(s['event_count']>0 for s in status_rows),'steady_control':'regenerated using original steady reference and original piecewise algorithm; not refit with hybrid parameters','arrow_frames':'not produced; previous frame_pngs and matched_array.png are template/inference outputs, not raw array simulation','cache_format':'array_current_A.npy float32, axes row,col,time; CSV current float64 rounded to 12 significant digits','source_generator':str(OLD/'阵列模拟-带mask和logo-18.py')}
+    (ROOT/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8')
+    shutil.copy2(__file__,CODE/Path(__file__).name);shutil.copy2(FIT/'fitted_parameters.json',CODE/'fitted_parameters.json');shutil.copy2(FIT/'fit_array_response_dynamics.py',CODE/'fit_array_response_dynamics.py');shutil.copy2(OLD/'car_bin.png',CODE/'car_bin.png')
+    print('DONE',ROOT,flush=True)
